@@ -1,0 +1,60 @@
+name: E2E API Tests
+
+# Controls when the action will run. Triggers the workflow on push or pull request
+on:
+  workflow_call:
+
+    inputs:
+      ee:
+        description: 'use the ee version of api'
+        required: false
+        default: false
+        type: boolean
+
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+jobs:
+  # This workflow contains a single job called "build"
+  e2e_api:
+    # The type of runner that the job will run on
+    runs-on: ubuntu-latest
+    timeout-minutes: 80
+
+    # Steps represent a sequence of tasks that will be executed as part of the job
+    steps:
+      - uses: actions/checkout@v3
+
+      - if: ${{ inputs.ee }}
+        run: |
+          rm -f .npmrc
+          cp .npmrc-cloud .npmrc
+
+      - uses: ./.github/actions/setup-project
+      - uses: ./.github/actions/start-localstack
+
+      - uses: mansagroup/nrwl-nx-action@v3
+        with:
+          targets: lint
+          projects: "@novu/api"
+
+      - name: Install wait-on plugin
+        run: npm i -g wait-on
+
+      - name: Build worker-service
+        run: CI='' pnpm build:worker-service
+
+      - name: Start worker-service
+        run: cd apps/worker-service && pnpm start:test &
+
+      - name: Wait on worker-service
+        run: wait-on --timeout=180000 http://localhost:1342/v1/health-check
+
+        # Runs a single command using the runners shell
+      - name: Build API
+        run: CI='' pnpm build:api
+
+      # Runs a set of commands using the runners shell
+      - name: Run a test
+        run: |
+          cd apps/api && pnpm test:e2e
+          pnpm test
+  

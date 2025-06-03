@@ -1,0 +1,42 @@
+name: Deploy Jekyll site to GitHub Pages
+
+on:
+  push:
+    branches: ["*"]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Set GitHub Pages directory
+        id: github-pages
+        run: |
+          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            echo "::set-output name=directory::main"
+          else
+            echo "::set-output name=directory::pr-preview/pr-${{ github.ref }}"
+          fi
+      - name: Set Jekyll base url
+        uses: fjogeleit/yaml-update-action@main
+        with:
+          valueFile: '_config.yml'
+          propertyPath: 'baseurl'
+          value: '/folkebibliotekernes_cms_manual/${{ steps.github-pages.outputs.directory }}'
+          commitChange: false
+      - name: Setup Pages
+        id: pages
+        uses: actions/configure-pages@v3
+      - name: Build
+        uses: actions/jekyll-build-pages@v1
+        with:
+          destination: ./build
+      - name: Deploy
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_branch: gh-pages
+          publish_dir: ./build
+          destination_dir: ${{ steps.github-pages.outputs.directory }}
+          enable_jekyll: false

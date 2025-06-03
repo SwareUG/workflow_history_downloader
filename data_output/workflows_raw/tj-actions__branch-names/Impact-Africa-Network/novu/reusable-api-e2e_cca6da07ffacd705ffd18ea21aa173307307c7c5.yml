@@ -1,0 +1,64 @@
+name: E2E API Tests
+
+# Controls when the action will run. Triggers the workflow on push or pull request
+on:
+  workflow_call:
+
+    inputs:
+      ee:
+        description: 'use the ee version of api'
+        required: false
+        default: false
+        type: boolean
+
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+jobs:
+  # This workflow contains a single job called "build"
+  e2e_api:
+    # The type of runner that the job will run on
+    runs-on: ubuntu-latest
+    timeout-minutes: 80
+
+    # Steps represent a sequence of tasks that will be executed as part of the job
+    steps:
+      - uses: actions/checkout@v3
+      - uses: ./.github/actions/setup-project
+      - uses: ./.github/actions/setup-redis-cluster
+      - uses: mansagroup/nrwl-nx-action@v3
+        with:
+          targets: lint
+          projects: "@novu/api"
+
+      - uses: ./.github/actions/start-localstack
+
+      - name: Install wait-on plugin
+        run: npm i -g wait-on
+
+      - name: Build worker
+        run: CI='' pnpm build:worker
+
+      - name: Start worker
+        env:
+          IN_MEMORY_CLUSTER_MODE_ENABLED: true
+        run: cd apps/worker && pnpm start:test &
+
+      - name: Wait on worker
+        run: wait-on --timeout=180000 http://localhost:1342/v1/health-check
+
+        # Runs a single command using the runners shell
+      - name: Build API
+        run: CI='' pnpm build:api
+
+      - name: Run E2E tests
+        env:
+          IN_MEMORY_CLUSTER_MODE_ENABLED: true
+        run: |
+          cd apps/api && pnpm test:e2e
+
+      - name: Run unit tests
+        env:
+          IN_MEMORY_CLUSTER_MODE_ENABLED: true
+        run: |
+          cd apps/api && pnpm test
+          
+  

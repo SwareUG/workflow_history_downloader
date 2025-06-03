@@ -1,0 +1,61 @@
+on:
+  pull_request:
+    branches: [trunk]
+    paths:
+      - '**.php'
+  push:
+    branches: [trunk]
+    paths:
+      - '**.php'
+
+name: WordPress Autofixer
+
+jobs:
+  phpcbf-fixer:
+    # only run on branches not ending in -phpcbf or release-please (since it's already run)
+    if: "!contains(github.ref, '-phpcbf') && !contains(github.ref, 'release-please')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          ref: ${{ github.head_ref }}
+
+      - name: Cache Composer dependencies
+        uses: actions/cache@v3
+        with:
+          path: /tmp/composer-cache
+          key: ${{ runner.os }}-${{ hashFiles('**/composer.lock') }}
+
+      - name: Composer Install
+        uses: php-actions/composer@v6
+        with:
+          working_dir: ./
+          php_version: 7.4
+
+      # Check the code-style consistency of the PHP files.
+      - name: Fix PHP code style
+        id: codestyle
+        continue-on-error: true
+        run : |
+          ./vendor/squizlabs/php_codesniffer/bin/phpcbf ./ --standard=./phpcs.xml
+
+      - name: Get Branch Names
+        id: branch
+        uses: tj-actions/branch-names@v6.5
+
+      - name: Create Pull Request
+        id: cpr
+        uses: peter-evans/create-pull-request@v5
+        with:
+          token: ${{ secrets.GH_BOT_TOKEN }}
+          commit-message: PHPCBF Auto Fix
+          committer: Linchpin Bot <dev@linchpin.com>
+          signoff: false
+          branch: ${{ steps.branch.outputs.current_branch }}-phpcbf
+          delete-branch: true
+          title: 'Auto Fix Formatting'
+          body: |
+            Update Code Formatting
+          labels: |
+            phpcs
+            automated pr

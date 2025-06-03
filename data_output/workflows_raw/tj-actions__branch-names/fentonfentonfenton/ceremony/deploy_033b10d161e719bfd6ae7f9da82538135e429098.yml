@@ -1,0 +1,60 @@
+name: ©EREMONY DEPLOY
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to deploy'
+        required: true
+        default: 'main'
+jobs:
+  deploy:
+    name: Deploy ©EREMONY
+
+    runs-on: ubuntu-latest
+
+    permissions:
+      deployments: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: chrnorm/deployment-action@v2
+        name: Create GitHub deployment
+        id: deployment
+        with:
+          token: '${{ github.token }}'
+          environment: test-AF
+
+      - name: Get release
+        uses: dsaltares/fetch-gh-release-asset@master
+        with:
+          version: ${{ inputs.environment }}
+          file: 'build.zip'
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Unzip release
+        run: unzip -o build.zip -d build
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          aws-access-key-id: ${{ secrets.AWS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY}}
+          aws-region: eu-west-2
+
+      - name: Deploy to S3
+        run: |
+          cd build
+          aws s3 sync --delete . s3://${{ secrets.AWS_BUCKET }}
+
+      - name: Update deployment status (success)
+        if: success()
+        uses: chrnorm/deployment-status@releases/v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          target_url: https://aws-bucket.s3.ap-northeast-2.amazonaws.com/${{steps.S3.outputs.object_key}}/index.html
+          state: 'success'
+          deployment_id: ${{ steps.id.outputs.deployment_id }}
+
+        

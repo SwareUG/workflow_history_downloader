@@ -1,0 +1,29 @@
+name: ©EREMONY CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build_and_release:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v2
+    - uses: actions/setup-node@v4
+      id: build
+      with:
+        node-version-file: .nvmrc
+    - run: |
+        npm install
+        npm run build
+    - uses: nelonoel/branch-name@v1
+      env:
+        ACTIONS_ALLOW_UNSECURE_COMMANDS: true
+    - uses: ncipollo/release-action@v1
+      id: release
+      with:
+        artifacts: "build/**/*"
+        name: ${BRANCH_NAME}
+        tag: ${BRANCH_NAME}
+

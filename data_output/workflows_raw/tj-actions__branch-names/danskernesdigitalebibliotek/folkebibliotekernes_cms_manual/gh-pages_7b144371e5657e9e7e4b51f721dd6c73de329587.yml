@@ -1,0 +1,96 @@
+name: Deploy Jekyll site to GitHub Pages
+
+on:
+  push:
+    branches: ["*"]
+  delete:
+    branches: ["*"]
+
+env:
+  GITHUB_PAGES_BRANCH: "gh-pages"
+  BUILD_DIR: "./build"
+  REPO_NAME: 'folkebibliotekernes_cms_manual'
+  PREVIEW_SUBDIR: 'preview'
+
+jobs:
+  build:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Get branch names
+        id: branch-name
+        uses: tj-actions/branch-names@v7
+      - name: Set GitHub Pages directory
+        id: github-pages
+        run: |
+          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            echo "::set-output name=directory::main"
+            echo "::set-output name=url::https://${{ github.repository_owner }}.github.io/${{ env.REPO_NAME }}/main"
+          else
+            echo "::set-output name=directory::preview/${{ steps.branch-name.outputs.current_branch }}"
+            echo "::set-output name=url::https://${{ github.repository_owner }}.github.io/${{ env.REPO_NAME }}/${{ env.PREVIEW_SUBDIR }}/${{ steps.branch-name.outputs.current_branch }}"
+          fi
+      - name: Set Jekyll base url
+        uses: fjogeleit/yaml-update-action@main
+        with:
+          valueFile: '_config.yml'
+          propertyPath: 'baseurl'
+          value: '/${{ env.REPO_NAME }}/${{ steps.github-pages.outputs.directory }}'
+          commitChange: false
+      - name: Setup Pages
+        id: pages
+        uses: actions/configure-pages@v3
+      - name: Build
+        uses: actions/jekyll-build-pages@v1
+        with:
+          destination: ${{ env.BUILD_DIR }}
+      - name: Start deployment
+        uses: bobheadxi/deployments@v1
+        id: deployment
+        with:
+          step: start
+          token: ${{ secrets.GITHUB_TOKEN }}
+          env: ${{ steps.branch-name.outputs.current_branch }}
+      - name: Deploy
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_branch: ${{ env.GITHUB_PAGES_BRANCH }}
+          publish_dir: ${{ env.BUILD_DIR }}
+          destination_dir: ${{ steps.github-pages.outputs.directory }}
+          enable_jekyll: false
+      - name: Update deployment status
+        uses: bobheadxi/deployments@v1
+        if: always()
+        with:
+          step: finish
+          token: ${{ secrets.GITHUB_TOKEN }}
+          status: ${{ job.status }}
+          env: ${{ steps.deployment.outputs.env }}
+          deployment_id: ${{ steps.deployment.outputs.deployment_id }}
+          env_url: ${{ steps.github-pages.outputs.url }}
+
+  delete:
+    if: github.event_name == 'delete'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ env.GITHUB_PAGES_BRANCH }}
+      # We cannot use tj-actions/branch-names to get the name of the deleted
+      # branch as it will already be deleted when this runs.
+      - name: Delete preview
+        run: |
+          rm -rf ${{ env.PREVIEW_SUBDIR }}/${{ github.event.ref }}
+      - uses: stefanzweifel/git-auto-commit-action@v4
+        with:
+          commit_message: "Delete preview for ${{ github.event.ref }}"
+      - name: Close environment
+        uses: bobheadxi/deployments@v1
+        with:
+          step: deactivate-env
+          token: ${{ secrets.GITHUB_TOKEN }}
+          env: ${{ github.event.ref }}

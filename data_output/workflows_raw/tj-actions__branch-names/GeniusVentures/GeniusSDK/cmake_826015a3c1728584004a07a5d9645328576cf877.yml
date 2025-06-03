@@ -1,0 +1,264 @@
+name: Release Build CI
+
+on:
+  push:
+    branches:
+      - develop
+      - main
+  pull_request:
+    branches:
+      - develop
+      - main
+  workflow_dispatch:
+
+jobs:
+  build:
+    env:
+      GRPC_BUILD_ENABLE_CCACHE: "ON"
+      GH_TOKEN: ${{ secrets.GNUS_TOKEN_1 }}
+    runs-on: ${{matrix.host}}
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [Android, iOS, OSX, Linux, Windows]
+        build-type: [Release]
+        abi: [""]
+        include:
+          - target: Linux
+            host: ubuntu-latest
+          - target: Windows
+            host: windows-latest
+          - target: OSX
+            host: macos-latest
+          - target: Android
+            host: ubuntu-latest
+            abi: arm64-v8a
+            build-type: Release
+          - target: Android
+            host: ubuntu-latest
+            abi: armeabi-v7a
+            build-type: Release
+          - target: iOS
+            host: macos-latest
+        exclude:
+          - target: Android
+            abi: ""
+    steps:
+      - name: Configure Linux host
+        if: ${{ runner.os == 'Linux'}}
+        run: |
+          sudo update-alternatives --install /usr/bin/cc cc $(which clang) 100
+          sudo update-alternatives --install /usr/bin/c++ c++ $(which clang++) 100
+          sudo update-alternatives --set cc $(which clang)
+          sudo update-alternatives --set c++ $(which clang++)
+           
+          sudo apt install ccache ninja-build libvulkan-dev libzstd-dev -y
+          echo "CMAKE_GENERATOR=Ninja" >> $GITHUB_ENV
+
+      - name: Configure Windows host
+        if: ${{ runner.os == 'Windows'}}
+        run: |
+          choco install ccache -A
+
+      - name: Configure macOS host
+        if: ${{ runner.os == 'macOS'}}
+        run: |
+          brew install ccache ninja bash gnu-tar
+          PATH="$HOMEBREW_PREFIX/opt/gnu-tar/libexec/gnubin:$PATH"
+          echo "PATH=$PATH" >> $GITHUB_ENV
+          echo "CMAKE_GENERATOR=Ninja" >> $GITHUB_ENV
+
+      - name: Install bindgen
+        run: cargo install cbindgen
+
+      - name: Add Rust wasm target
+        run: rustup target add wasm32-unknown-emscripten
+
+      - name: Set build directory
+        run: |
+          if [ '${{matrix.abi}}' ]; then
+            BUILD_DIRECTORY=build/${{matrix.target}}/${{matrix.build-type}}/${{matrix.abi}}
+          else
+            BUILD_DIRECTORY=build/${{matrix.target}}/${{matrix.build-type}}
+          fi
+          echo "BUILD_DIRECTORY=$BUILD_DIRECTORY" >> $GITHUB_ENV
+        shell: bash
+
+      - name: Download thirdparty
+        working-directory: ${{github.workspace}}
+        run: |
+          if ${{github.event_name == 'pull_request'}}; then
+              current_branch=${{ github.event.pull_request.head.ref }}
+          else
+              current_branch=$GITHUB_REF_NAME
+          fi
+
+          echo "Identified current branch as ${current_branch}"
+
+          echo "CURRENT_BRANCH=${current_branch}" >>$GITHUB_ENV
+
+          if git ls-remote --heads https://github.com/GeniusVentures/thirdparty.git $current_branch | grep -q $current_branch; then
+              thirdparty_branch=${current_branch}
+          else
+              thirdparty_branch=develop
+          fi
+          echo "Using ${thirdparty_branch} branch from thirdparty"
+
+          mkdir thirdparty
+          cd thirdparty
+
+          if [ '${{matrix.abi}}' ]; then
+              tag_name=${{matrix.target}}-${{matrix.abi}}-$thirdparty_branch-Release
+          else
+              tag_name=${{matrix.target}}-$thirdparty_branch-Release
+          fi
+
+          gh release download ${tag_name} --repo GeniusVentures/thirdparty -p '*-lib.tar.gz'
+
+          echo "Found libraries:"
+
+          for library in *-lib.tar.gz; do
+              echo "${library}"
+              tar -xzf "${library}"
+          done
+        shell: bash
+
+      - name: Download zkLLVM
+        working-directory: ${{github.workspace}}
+        run: |
+          if git ls-remote --heads https://github.com/GeniusVentures/zkLLVM.git $CURRENT_BRANCH | grep -q $CURRENT_BRANCH; then
+              zkllvm_branch=${CURRENT_BRANCH}
+          else
+              zkllvm_branch=develop
+          fi
+
+          if [ '${{matrix.abi}}' ]; then
+              tag_name=${{matrix.target}}-${{matrix.abi}}-${zkllvm_branch}-Release
+          else
+              tag_name=${{matrix.target}}-${zkllvm_branch}-Release
+          fi
+          echo "Using ${zkllvm_branch} branch from zkLLVM"
+
+          mkdir zkLLVM
+          cd zkLLVM
+
+          gh release download ${tag_name} --repo GeniusVentures/zkLLVM -p '*.tar.gz'
+
+          echo "Found libraries:"
+
+          for library in *.tar.gz; do
+              echo "${library}"
+              tar --exclude='*bin/assigner' --exclude='*bin/clang-zkllvm' --exclude='*bin/llvm-link-zkllvm' --exclude='*bin/transpiler' -xzf "${library}"
+          done
+
+          echo "ZKLLVM_DIR=${{github.workspace}}/zkLLVM/${{env.BUILD_DIRECTORY}}" >>$GITHUB_ENV
+        shell: bash
+
+      - name: Download SuperGenius
+        run: |
+          if git ls-remote --heads https://github.com/GeniusVentures/SuperGenius.git $CURRENT_BRANCH | grep -q $CURRENT_BRANCH; then
+              sgns_branch=${CURRENT_BRANCH}
+          else
+              sgns_branch=develop
+          fi
+
+          mkdir SuperGenius
+          cd SuperGenius
+
+          if [ '${{matrix.abi}}' ]; then
+              tag_name=${{matrix.target}}-${{matrix.abi}}-$sgns_branch-Release
+          else
+              tag_name=${{matrix.target}}-$sgns_branch-Release
+          fi
+          echo "Using ${sgns_branch} branch from SuperGenius"
+
+          gh release download ${tag_name} --repo GeniusVentures/SuperGenius -p "*.tar.gz"
+
+          echo "Found libraries:"
+
+          for library in *.tar.gz; do
+              echo "${library}"
+              tar -xzf "${library}"
+          done
+        shell: bash
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          path: "GeniusSDK"
+          submodules: "recursive"
+
+      - name: Configure CMake for Android
+        if: ${{ matrix.target == 'Android'}}
+        working-directory: ${{github.workspace}}/GeniusSDK
+        run: cmake -S build/${{matrix.target}} -B $BUILD_DIRECTORY -DCMAKE_BUILD_TYPE=${{matrix.build-type}} -DANDROID_ABI=${{matrix.abi}} -DTHIRDPARTY_BUILD_DIR=${{github.workspace}}/thirdparty -DTHIRDPARTY_DIR=${{github.workspace}}/thirdparty -DZKLLVM_DIR=${{env.ZKLLVM_DIR}} -DSUPERGENIUS_SRC_DIR=${{github.workspace}}/SuperGenius
+
+      - name: Configure CMake for Mac
+        if: ${{ matrix.target == 'OSX'}}
+        working-directory: ${{github.workspace}}/GeniusSDK
+        run: cmake -S build/${{matrix.target}} -B $BUILD_DIRECTORY -DCMAKE_BUILD_TYPE=${{matrix.build-type}} -DPLATFORM=MAC_UNIVERSAL -DTHIRDPARTY_BUILD_DIR=${{github.workspace}}/thirdparty -DTHIRDPARTY_DIR=${{github.workspace}}/thirdparty -DZKLLVM_DIR=${{env.ZKLLVM_DIR}} -DSUPERGENIUS_SRC_DIR=${{github.workspace}}/SuperGenius
+
+      - name: Configure CMake for iOS
+        if: ${{ matrix.target == 'iOS'}}
+        working-directory: ${{github.workspace}}/GeniusSDK
+        run: cmake -S build/${{matrix.target}} -B $BUILD_DIRECTORY -DCMAKE_BUILD_TYPE=${{matrix.build-type}} -DPLATFORM=OS64 -DTHIRDPARTY_BUILD_DIR=${{github.workspace}}/thirdparty -DTHIRDPARTY_DIR=${{github.workspace}}/thirdparty -DZKLLVM_DIR=${{env.ZKLLVM_DIR}} -DSUPERGENIUS_SRC_DIR=${{github.workspace}}/SuperGenius
+
+      - name: Configure CMake for Linux
+        if: ${{matrix.target == 'Linux'}}
+        working-directory: ${{github.workspace}}/GeniusSDK
+        run: cmake -S build/${{matrix.target}} -B $BUILD_DIRECTORY -DCMAKE_BUILD_TYPE=${{matrix.build-type}} -DTHIRDPARTY_BUILD_DIR=${{github.workspace}}/thirdparty -DTHIRDPARTY_DIR=${{github.workspace}}/thirdparty -DZKLLVM_DIR=${{env.ZKLLVM_DIR}} -DSUPERGENIUS_SRC_DIR=${{github.workspace}}/SuperGenius
+
+      - name: Configure CMake for Windows
+        if: ${{matrix.target == 'Windows'}}
+        working-directory: ${{github.workspace}}/GeniusSDK
+        run: cmake -S build/${{matrix.target}} -B $env:BUILD_DIRECTORY -DCMAKE_BUILD_TYPE=${{matrix.build-type}} -DTHIRDPARTY_BUILD_DIR=${{github.workspace}}/thirdparty -DTHIRDPARTY_DIR=${{github.workspace}}/thirdparty -DZKLLVM_DIR=${{env.ZKLLVM_DIR}} -DSUPERGENIUS_SRC_DIR=${{github.workspace}}/SuperGenius
+
+      - name: Build GeniusSDK
+        working-directory: ${{github.workspace}}/GeniusSDK
+        run: cmake --build $BUILD_DIRECTORY --config ${{matrix.build-type}} -j
+        shell: bash
+
+      - name: Install GeniusSDK
+        working-directory: ${{github.workspace}}/GeniusSDK/${{env.BUILD_DIRECTORY}}
+        run: cmake --install .
+
+      - name: Compressing Build Artifacts
+        working-directory: ${{github.workspace}}/GeniusSDK/${{env.BUILD_DIRECTORY}}
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        run: |
+          tar --exclude=.git -czvf GeniusSDK.tar.gz --transform 's|^|${{env.BUILD_DIRECTORY}}/|' GeniusSDK
+        shell: bash
+
+      - name: Release SDK
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        shell: bash
+        run: |
+          if [ '${{matrix.abi}}' ]; then
+            OS_NAME=${{matrix.target}}-${{matrix.abi}}
+          else
+            OS_NAME=${{matrix.target}}
+          fi
+
+          file_name="${OS_NAME}-${CURRENT_BRANCH}-${{matrix.build-type}}.tar.gz"
+          RELEASE_TAG=${OS_NAME}-${CURRENT_BRANCH}-${{matrix.build-type}}
+
+          mv SuperGenius.tar.gz $file_name
+
+          if ! gh release view $RELEASE_TAG; then
+              echo "Release not found, creating tag ${RELEASE_TAG}"
+
+              if [ '${{matrix.build-type}}' != 'Release' ]; then
+                  RELEASE_TYPE="--prerelease"
+              else
+                  RELEASE_TYPE="--latest"
+              fi
+
+              gh release create ${RELEASE_TAG} \
+                  -n "${CURRENT_BRANCH} branch" \
+                  --target "${CURRENT_BRANCH}" \
+                  ${RELEASE_TYPE} \
+                  -t "${{matrix.target}} ${{matrix.abi && format('({0}) ', matrix.abi) || ''}}${CURRENT_BRANCH} branch ${{matrix.build-type}} build"
+          fi
+
+          echo -e "Uploading ${file_name}"
+          gh release upload --clobber ${RELEASE_TAG} ${file_name}

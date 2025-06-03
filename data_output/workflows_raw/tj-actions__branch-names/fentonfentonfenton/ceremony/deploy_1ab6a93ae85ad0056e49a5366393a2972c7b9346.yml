@@ -1,0 +1,53 @@
+name: ©EREMONY CI
+
+on:
+  workflow_dispatch:
+
+    jobs:
+      deploy:
+        name: Deploy ©EREMONY
+    
+        runs-on: ubuntu-latest
+    
+        permissions:
+          deployments: write
+    
+        steps:
+          - uses: actions/checkout@v4
+    
+          - uses: chrnorm/deployment-action@v2
+            name: Create GitHub deployment
+            id: deployment
+            with:
+              token: '${{ github.token }}'
+              environment: test-AF
+
+          - name: Get release
+            uses: dsaltares/fetch-gh-release-asset@master
+            with:
+              version: 'CI/CD'
+              file: 'build.zip'
+              token: ${{ secrets.GITHUB_TOKEN }}
+
+          - name: Unzip release
+            run: unzip -o build.zip -d build
+
+          - uses: shallwefootball/s3-upload-action@master
+            name: Upload S3
+            id: S3
+            with:
+              aws_key_id: ${{ secrets.AWS_KEY_ID }}
+              aws_secret_access_key: ${{ secrets.AWS_SECRET_ACCESS_KEY}}
+              aws_bucket: ${{ secrets.AWS_BUCKET }}
+              source_dir: 'build'
+
+          - name: Update deployment status (success)
+            if: success()
+            uses: chrnorm/deployment-status@releases/v1
+            with:
+              token: ${{ secrets.GITHUB_TOKEN }}
+              target_url: https://aws-bucket.s3.ap-northeast-2.amazonaws.com/${{steps.S3.outputs.object_key}}/index.html
+              state: 'success'
+              deployment_id: ${{ steps.test.outputs.deployment_id }}
+
+            
