@@ -1,3 +1,4 @@
 # workflow_history_downloader
 
-Ok
+TODO:
+- [] add date to each collection of yml files
