@@ -1,12 +1,15 @@
 import os
 import time
 import json
+import csv
 import requests
 from dotenv import load_dotenv
 
+# === Cargar token de entorno
 load_dotenv()
-
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
+
+# === Cabeceras de autenticación para GitHub API
 HEADERS = {
     "Authorization": f"Bearer {GITHUB_TOKEN}",
     "Accept": "application/vnd.github+json"
@@ -30,6 +33,20 @@ def load_json(path):
             return json.load(f)
     except Exception:
         return None
+
+def load_repo_list_from_csv(path):
+    repos = []
+    try:
+        with open(path, newline="", encoding="utf-8") as csvfile:
+            reader = csv.DictReader(csvfile)
+            for row in reader:
+                owner = row.get("repo_owner", "").strip()
+                name = row.get("repo_name", "").strip()
+                if owner and name:
+                    repos.append(f"{owner}/{name}")
+    except Exception as e:
+        print(f"Error al leer CSV: {e}")
+    return repos
 
 def is_valid_repo(repo_dict: dict) -> bool:
     return (
