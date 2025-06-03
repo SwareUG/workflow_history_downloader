@@ -28,7 +28,9 @@ From the `src` directory:
 
 Results are saved in:
 
-* `data/data_output/workflows_from_dependents/` (if using JSON)
-* `data/data_output/workflows_from_repo_list/` (if using CSV)
-* `data/data_output/logs/workflow_versions.csv` (log of downloaded files)
+- `data/data_output/workflows_from_dependents/` — if using JSON input
+- `data/data_output/workflows_from_repo_list/` — if using CSV input
+- `data/data_output/logs/logs_from_dependents/workflow_versions.csv` — log of downloaded files (JSON mode)
+- `data/data_output/logs/logs_from_repo_list/workflow_versions.csv` — log of downloaded files (CSV mode)
+
 
