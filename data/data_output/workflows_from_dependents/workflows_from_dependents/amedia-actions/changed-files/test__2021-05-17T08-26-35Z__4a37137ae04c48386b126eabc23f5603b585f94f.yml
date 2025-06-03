@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    name: Test changed-files
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2.3.4
+        with:
+          fetch-depth: 0
+      - name: Run changed-files with defaults
+        id: changed-files
+        uses: ./
+      - name: Show output
+        run: |
+          echo "${{ toJSON(steps.changed-files.outputs) }}"
+      - name: List all modified files
+        run: |
+          for file in "${{ steps.changed-files.outputs.modified_files }}"; do
+            echo $file
+          done
+      - name: Run step when README.md changes
+        if: contains(steps.changed-files.outputs.modified_files, 'README.md')
+        run: |
+          echo "Your README.md has been modified ${{ steps.changed-files.outputs.modified_files }}."
+      - name: Run changed-files with comma separator
+        id: changed-files-comma
+        uses: ./
+        with:
+          separator: ","
+      - name: Show output
+        run: |
+          echo "${{ toJSON(steps.changed-files-comma.outputs) }}"
+      - name: Run changed-files with specific files
+        id: changed-files-specific
+        uses: ./
+        with:
+          files: |
+            .github/workflows/test.yml
+            action.yml
+      - name: Verify any_changed files
+        if: "!contains(steps.changed-files-specific.outputs.all_modified_files, 'action.yml') && !contains(steps.changed-files-specific.outputs.all_modified_files, '.github/workflows/test.yml')"
+        run: |
+          if [[ "${{ steps.changed-files-specific.outputs.any_changed }}" != "false" ]]; then
+            echo "Invalid output: Expected (false) got (${{ steps.changed-files-specific.outputs.any_changed }})"
+            exit 1
+          fi
+      - name: Show output
+        run: |
+          echo "${{ toJSON(steps.changed-files-specific.outputs) }}"
+      - name: Run changed-files with specific files comma separator
+        id: changed-files-specific-comma
+        uses: ./
+        with:
+          files: |
+            .github/workflows/test.yml
+            action.yml
+          separator: ","
+      - name: Verify any_changed files comma separator
+        if: "!contains(steps.changed-files-specific-comma.outputs.all_modified_files, 'action.yml') && !contains(steps.changed-files-specific-comma.outputs.all_modified_files, '.github/workflows/test.yml')"
+        run: |
+          if [[ "${{ steps.changed-files-specific.outputs.any_changed }}" != "false" ]]; then
+            echo "Invalid output: Expected (false) got (${{ steps.changed-files-specific.outputs.any_changed }})"
+            exit 1
+          fi
+      - name: Show output
+        run: |
+          echo "${{ toJSON(steps.changed-files-specific-comma.outputs) }}"

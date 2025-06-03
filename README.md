@@ -33,4 +33,6 @@ Results are saved in:
 - `data/data_output/logs/logs_from_dependents/workflow_versions.csv` — log of downloaded files (JSON mode)
 - `data/data_output/logs/logs_from_repo_list/workflow_versions.csv` — log of downloaded files (CSV mode)
 
+### TODO
 
+- [ ] repo collection inclusion criteria definition for RQ1, RQ2
