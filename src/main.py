@@ -1,23 +1,37 @@
-import json
 import logging
+import json
+import csv
 from datetime import datetime, timezone
+from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from config import DISCLOSURE_DATA, log_path, json_dir, workflow_dir, log_dir
+
+from config import DISCLOSURE_DATA, json_dir, workflow_dir, log_dir, log_path
 from utils import load_json, is_valid_repo
 from processor import process_repository
-from tqdm import tqdm
 
-# === Asegurar que el directorio de logs existe
 log_dir.mkdir(parents=True, exist_ok=True)
 
-# === Configurar logging (archivo únicamente)
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s — %(levelname)s — %(message)s",
     handlers=[logging.FileHandler(log_path)]
 )
 
-def process_action_dataset(action_key: str, config: dict) -> dict:
+def save_json_summary(data: dict):
+    json_output_path = log_dir / "workflow_versions.json"
+    with json_output_path.open("w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+
+def save_csv(csv_records):
+    csv_path = log_dir / "workflow_versions.csv"
+    with open(csv_path, "w", newline="", encoding="utf-8") as csvfile:
+        fieldnames = ["repo_owner", "repo_name", "filename", "commit_date"]
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in csv_records:
+            writer.writerow(row)
+
+def process_action_dataset(action_key: str, config: dict, csv_records: list) -> dict:
     json_path = json_dir / config["json_filename"]
     data = load_json(json_path)
     if data is None:
@@ -38,14 +52,13 @@ def process_action_dataset(action_key: str, config: dict) -> dict:
 
     repo_data = {}
 
-    # ✅ max_workers = 1 para controlar consumo de API
     with ThreadPoolExecutor(max_workers=1) as executor:
         futures = {
-            executor.submit(process_repository, repo, base_dir): repo
+            executor.submit(process_repository, repo, base_dir, csv_records): repo
             for repo in filtered_repos
         }
 
-        for future in tqdm(as_completed(futures), total=len(futures), desc=f"{action_key}", ncols=80):
+        for future in as_completed(futures):
             processing = future.result()
             result = processing.summary
             details = processing.workflows
@@ -63,8 +76,7 @@ def process_action_dataset(action_key: str, config: dict) -> dict:
 
     return repo_data
 
-
-def build_workflow_summary() -> dict:
+def build_workflow_summary(csv_records) -> dict:
     summary = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "total_repositories": 0,
@@ -72,23 +84,17 @@ def build_workflow_summary() -> dict:
     }
 
     for key, config in DISCLOSURE_DATA.items():
-        repo_data = process_action_dataset(key, config)
+        repo_data = process_action_dataset(key, config, csv_records)
         summary["repositories"].update(repo_data)
         summary["total_repositories"] += len(repo_data)
 
     return summary
 
-
-def save_json_summary(data: dict):
-    json_output_path = log_dir / "workflow_versions.json"
-    with json_output_path.open("w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
-
-
 def main():
-    summary_data = build_workflow_summary()
+    csv_records = []
+    summary_data = build_workflow_summary(csv_records)
     save_json_summary(summary_data)
-
+    save_csv(csv_records)
 
 if __name__ == "__main__":
     main()

@@ -1,30 +1,24 @@
 import os
-import requests
 import base64
-import time
-import logging
-from dotenv import load_dotenv
+from pathlib import Path
+from utils import github_request_with_rate_handling
 
-load_dotenv()
+def format_commit_date(date_str):
+    return date_str.replace(":", "-")
 
-GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
-HEADERS = {
-    "Authorization": f"Bearer {GITHUB_TOKEN}",
-    "Accept": "application/vnd.github+json"
-}
-
-def github_request_with_rate_handling(url, params=None):
-    while True:
-        res = requests.get(url, headers=HEADERS, params=params)
-
-        if res.status_code == 403:
-            remaining = int(res.headers.get("X-RateLimit-Remaining", "1"))
-            reset_ts = int(res.headers.get("X-RateLimit-Reset", "0"))
-            now_ts = int(time.time())
-            if remaining == 0 and reset_ts > now_ts:
-                time.sleep(reset_ts - now_ts + 5)
-                continue
-        return res
+def save_version_to_disk(repo_dir, filename, sha, commit_date, content, csv_records, repo_owner, repo_name):
+    dt = format_commit_date(commit_date)
+    base = filename.replace(".yml", "")
+    new_name = f"{base}__{dt}__{sha}.yml"
+    filepath = repo_dir / new_name
+    with open(filepath, "w", encoding="utf-8") as f:
+        f.write(content)
+    csv_records.append({
+        "repo_owner": repo_owner,
+        "repo_name": repo_name,
+        "filename": new_name,
+        "commit_date": commit_date
+    })
 
 def get_repo_metadata(repo):
     owner, name = repo.split("/")
@@ -64,12 +58,7 @@ def get_file_content_at_commit(repo, path, sha):
         return base64.b64decode(content["content"]).decode("utf-8")
     return None
 
-def save_version_to_disk(repo_dir, filename, sha, content):
-    name = filename.replace(".yml", f"_{sha}.yml")
-    with open(os.path.join(repo_dir, name), "w", encoding="utf-8") as f:
-        f.write(content)
-
-def process_workflow_history(repo, wf_path, repo_dir):
+def process_workflow_history(repo, wf_path, repo_dir, csv_records, repo_owner, repo_name):
     commits = get_commits_for_file(repo, wf_path)
     if not commits:
         return None
@@ -78,30 +67,30 @@ def process_workflow_history(repo, wf_path, repo_dir):
     filename = os.path.basename(wf_path)
     for commit in commits:
         sha = commit["sha"]
+        commit_date = commit["commit"]["committer"]["date"]
         content = get_file_content_at_commit(repo, wf_path, sha)
         if content:
-            save_version_to_disk(repo_dir, filename, sha, content)
+            save_version_to_disk(repo_dir, filename, sha, commit_date, content, csv_records, repo_owner, repo_name)
     return {
         "version_count": len(commits),
         "first_commit_date": first,
         "last_commit_date": last
     }
 
-def download_all_workflow_versions(repo, out_dir):
+def download_all_workflow_versions(repo, out_dir, csv_records, repo_owner, repo_name):
     metadata = get_repo_metadata(repo)
     if not metadata or metadata.get("archived", True):
         return {}, "skipped"
 
     os.makedirs(out_dir, exist_ok=True)
-    owner, name = repo.split("/")
-    repo_dir = os.path.join(out_dir, name)
+    repo_dir = out_dir / repo_name
     os.makedirs(repo_dir, exist_ok=True)
 
     workflows = get_workflow_files(repo)
     details = {}
 
     for wf_path in workflows:
-        result = process_workflow_history(repo, wf_path, repo_dir)
+        result = process_workflow_history(repo, wf_path, repo_dir, csv_records, repo_owner, repo_name)
         if result:
             details[os.path.basename(wf_path)] = result
 

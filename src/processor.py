@@ -3,7 +3,7 @@ from pathlib import Path
 from models import RepoResult, Status, Reason, ProcessingResult
 from download_workflow_versions import download_all_workflow_versions, get_workflow_files
 
-def process_repository(repo: str, base_dir: Path) -> ProcessingResult:
+def process_repository(repo: str, base_dir: Path, csv_records: list) -> ProcessingResult:
     try:
         owner, name = repo.split("/")
     except ValueError:
@@ -27,7 +27,13 @@ def process_repository(repo: str, base_dir: Path) -> ProcessingResult:
         )
 
     try:
-        details, message = download_all_workflow_versions(repo=repo, out_dir=base_dir / owner)
+        details, message = download_all_workflow_versions(
+            repo=repo,
+            out_dir=base_dir / owner,
+            csv_records=csv_records,
+            repo_owner=owner,
+            repo_name=name
+        )
         downloaded_flag = 1 if "Downloaded" in message else 0
         workflow_count = len(details)
         commit_count = sum(d["version_count"] for d in details.values())

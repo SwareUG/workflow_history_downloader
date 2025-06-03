@@ -1,2 +1,0 @@
-- name: CodeQL Bundle
-  uses: advanced-security/codeql-bundle-action@v1.0.0
